@@ -18,8 +18,9 @@ def run():
     print("🚀 Training hybrid model...")
     model = train_hybrid(interactions, weights, user_feat_matrix, item_feat_matrix, epochs=30)
 
-    print("💾 Saving model and dataset...")
-    save_model(model, "hybrid_model.pkl", dataset=dataset)
+    print("💾 Saving model, dataset, and feature matrices...")
+    save_model(model, "hybrid_model.pkl", dataset=dataset, 
+              user_features=user_feat_matrix, item_features=item_feat_matrix)
     print("✅ Training complete.")
 
 if __name__ == "__main__":

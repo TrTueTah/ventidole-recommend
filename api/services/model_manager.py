@@ -60,11 +60,11 @@ class ModelManager:
         try:
             logger.info(f"Loading recommendation model from {model_path}...")
 
-            # 1. Load the trained model and dataset
-            self.model, saved_dataset = load_model(model_path)
+            # 1. Load the trained model, dataset, and feature matrices
+            self.model, saved_dataset, saved_user_features, saved_item_features = load_model(model_path)
             logger.info("Model loaded successfully")
 
-            # 2. Load data from PostgreSQL
+            # 2. Load data from PostgreSQL (only for metadata)
             logger.info("Loading data from database...")
             users_df = load_users()
             posts_df = load_posts()
@@ -72,29 +72,20 @@ class ModelManager:
             community_followers_df = load_community_followers()
             logger.info(f"Loaded {len(users_df)} users, {len(posts_df)} posts, {len(interactions_df)} interactions")
 
-            # 3. Build dataset and feature matrices
-            # If dataset was saved with model, use it for consistent feature mappings
+            # 3. Use saved dataset and feature matrices for consistency
+            # If they were saved with model, use them directly to avoid feature mismatch
             # Otherwise, rebuild from current data (backward compatibility)
-            if saved_dataset is not None:
-                logger.info("Using saved dataset for consistent feature mappings...")
+            if saved_dataset is not None and saved_user_features is not None and saved_item_features is not None:
+                logger.info("Using saved dataset and feature matrices for consistent inference...")
                 self.dataset = saved_dataset
-                # Rebuild feature matrices using saved dataset
-                from data.preprocess import build_user_item_features
-                user_feats, item_feats = build_user_item_features(
-                    users_df, posts_df, interactions_df, community_followers_df
-                )
-                self.user_features = self.dataset.build_user_features([
-                    (uid, feats) for uid, feats in user_feats.items()
-                ])
-                self.item_features = self.dataset.build_item_features([
-                    (iid, feats) for iid, feats in item_feats.items()
-                ])
+                self.user_features = saved_user_features
+                self.item_features = saved_item_features
             else:
-                logger.info("Building feature matrices from current data...")
+                logger.info("Building feature matrices from current data (legacy model)...")
                 self.dataset, interactions, weights, self.user_features, self.item_features = build_dataset(
                     users_df, posts_df, interactions_df, community_followers_df
                 )
-            logger.info("Feature matrices built successfully")
+            logger.info(f"Feature matrices loaded: user_features shape={self.user_features.shape}, item_features shape={self.item_features.shape}")
 
             # 4. Extract mappings from dataset
             logger.info("Extracting ID mappings...")

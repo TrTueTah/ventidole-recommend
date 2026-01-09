@@ -118,8 +118,9 @@ def train_model():
             temp_model_path = temp_file.name
             logger.info(f"Temporary model path: {temp_model_path}")
 
-        save_model(model, temp_model_path, dataset=dataset)
-        logger.info(f"Model and dataset saved to temporary file: {temp_model_path}")
+        save_model(model, temp_model_path, dataset=dataset, 
+                  user_features=user_feat_matrix, item_features=item_feat_matrix)
+        logger.info(f"Model, dataset, and feature matrices saved to temporary file: {temp_model_path}")
 
         # Step 5: Atomic replacement - rename temp file to final path
         logger.info("Step 5/5: Performing atomic model replacement...")
