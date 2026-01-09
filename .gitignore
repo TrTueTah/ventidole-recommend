@@ -1,0 +1,106 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv
+
+# Environment variables
+.env
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+!logs/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Model backups
+hybrid_model_backup_*.pkl
+hybrid_model_temp_*.pkl
+
+# Trained models and storage
+models/*.pkl
+models/*.joblib
+models/*.h5
+models/*.pt
+models/*.pth
+models/*.ckpt
+models/*.npz
+storage/*.pkl
+storage/*.joblib
+!models/.gitkeep
+!storage/.gitkeep
+
+# Lock files
+/tmp/model_training.lock
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# FastAPI
+.pytest_cache/
+
+# Data files (uncomment if you want to ignore data)
+# data/*.csv
+# data/*.parquet
+# data/*.feather
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Docker
+.dockerignore
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
+
+# Distribution
+*.egg-info/
+dist/
+MANIFEST

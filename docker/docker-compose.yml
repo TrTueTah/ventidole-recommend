@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  recommendation-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: recommendation-service
+    ports:
+      - "8000:8000"
+    env_file:
+      - ../.env
+    environment:
+      # Container-specific overrides
+      - API_HOST=0.0.0.0
+      - MODEL_PATH=/app/hybrid_model.pkl
+    volumes:
+      # Mount model file as read-only
+      - ../hybrid_model.pkl:/app/hybrid_model.pkl:ro
+      # Mount .env file (optional)
+      - ../.env:/app/.env:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - recommendation-network
+
+networks:
+  recommendation-network:
+    driver: bridge

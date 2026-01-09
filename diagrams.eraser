@@ -1,0 +1,125 @@
+# Seed Service Architecture Diagrams - Presentation Ready
+# Visit https://app.eraser.io/ to visualize these diagrams
+
+## 1. High-Level System Architecture
+```
+// High-Level System Architecture
+title K-pop Recommendation Service - System Overview
+
+Clients [icon: users, color: blue]
+FastAPI Service [icon: server, color: orange]
+LightFM Model [icon: brain, color: red]
+PostgreSQL [icon: database, color: blue]
+Cron Training [icon: clock, color: green]
+
+Clients > FastAPI Service: API Requests
+FastAPI Service > LightFM Model: Get Recommendations
+FastAPI Service > PostgreSQL: Query Data
+Cron Training > PostgreSQL: Load Training Data
+Cron Training > LightFM Model: Update Model (Every 5 min)
+```
+
+## 2. Request Flow
+```
+// Recommendation Request Flow
+title How Recommendations Work
+
+Client [icon: user, color: blue]
+API [icon: server, color: orange]
+ML Engine [icon: brain, color: red]
+Database [icon: database, color: blue]
+
+Client > API: Request recommendations
+API > ML Engine: Get scores for user
+ML Engine > Database: Fetch features
+Database > ML Engine: User & post data
+ML Engine > API: Top recommendations
+API > Client: 20 posts (paginated)
+```
+
+## 3. Training Pipeline
+```
+// Automated Training
+title Automated Model Training (Every 5 Minutes)
+
+Database [icon: database, color: blue]
+Training Process [icon: gear, color: orange]
+ML Model [icon: brain, color: red]
+API Service [icon: server, color: green]
+
+Database > Training Process: Load data\n(Users, Posts, Interactions)
+Training Process > Training Process: Build features\nTrain LightFM (~45s)
+Training Process > ML Model: Save new model
+ML Model > API Service: Hot reload\n(Zero downtime)
+```
+
+## 4. System Components
+```
+// Main Components
+title System Components
+
+Client Layer [icon: users, color: blue]
+API Layer [icon: server, color: orange]
+ML Layer [icon: brain, color: red]
+Data Layer [icon: database, color: blue]
+Training Layer [icon: refresh, color: green]
+
+Client Layer > API Layer: HTTP/REST
+API Layer > ML Layer: Inference
+API Layer > Data Layer: Queries
+Training Layer > Data Layer: Fetch
+Training Layer > ML Layer: Update
+```
+
+## 5. Data Flow
+```
+// Data Flow Overview
+title Data Flow - From Database to Recommendations
+
+PostgreSQL [icon: database, color: blue] {
+  500 Users
+  2,016 Posts
+  Interactions
+}
+
+Feature Engineering [icon: filter, color: purple] {
+  User Features
+  Item Features
+}
+
+Hybrid Model [icon: brain, color: red] {
+  Collaborative Filtering
+  +
+  Content-Based
+}
+
+API Response [icon: check, color: green]
+
+PostgreSQL > Feature Engineering: Extract
+Feature Engineering > Hybrid Model: Train/Inference
+Hybrid Model > API Response: Top K Posts
+```
+
+## How to Use
+
+1. **Visit** https://app.eraser.io/
+2. **Create** a new document
+3. **Copy** any diagram code block (between ```)
+4. **Paste** into Eraser.io editor
+5. Diagram renders automatically
+
+## Color Guide
+
+- 🔵 **Blue**: Clients, Databases
+- 🟠 **Orange**: API Layer, Training
+- 🟣 **Purple**: Processing
+- 🔴 **Red**: ML Models
+- 🟢 **Green**: Infrastructure, Results
+
+## Presentation Tips
+
+- **Diagram 1**: Overall architecture - best for introduction
+- **Diagram 2**: Request flow - explain user experience
+- **Diagram 3**: Training pipeline - show automation
+- **Diagram 4**: System layers - technical overview
+- **Diagram 5**: Data flow - explain ML pipeline
