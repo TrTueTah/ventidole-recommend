@@ -3,348 +3,504 @@ import json
 import uuid
 import random
 from datetime import datetime, timedelta
+from collections import defaultdict
 from psycopg2.extras import execute_batch, Json
 from config import DB_CONFIG
 
-# ================= CONFIG =================
+# =====================================================
+# CONFIG
+# =====================================================
 TOTAL_FANS = 500
-POST_PER_USER = (2, 6)
 FOLLOW_RATE = 0.6
-UNFOLLOW_POST_RATE = 0.1
+
+POST_RANGE_IDOL = (20, 40)
+POST_RANGE_FAN = (1, 5)
+
+NOISE_POST_RATE = 0.1
+NOISE_INTERACTION_RATE = 0.05
 
 START_DATE = datetime(2023, 1, 1)
 END_DATE = datetime(2025, 1, 1)
 
+VIEW_RANGE = (5, 25)
+LIKE_RATIO = (0.1, 0.3)
+COMMENT_RATIO = (0.05, 0.15)
+
+IDOL_LIKE_BOOST = 1.5
+IDOL_COMMENT_BOOST = 2.0
+
 AVATAR = "https://i.pravatar.cc/300?img={}"
 BG = "https://picsum.photos/1200/400?random={}"
-TAGS_POOL = ["music", "gaming", "concert", "behind_the_scene", "fan_meet"]
+POST_IMAGE = "https://picsum.photos/800/600?random={}"
 
-# ================= UTILS =================
+POST_IMAGE_RATE = 0.8  # 80% of posts have images
+
+# =====================================================
+# TAG SYSTEM (USER FRIENDLY)
+# =====================================================
+TAG_CATALOG = {
+    "content": [
+        "discussion",
+        "fan_content",
+        "announcement",
+        "media"
+    ],
+    "theme": [
+        "music",
+        "kpop",
+        "dance",
+        "vocal",
+        "choreography",
+        "behind_the_scene",
+        "daily_life",
+        "collab"
+    ],
+    "mood": [
+        "hype",
+        "emotional",
+        "funny",
+        "wholesome",
+        "serious"
+    ],
+    "event": [
+        "concert",
+        "fan_meet",
+        "release",
+        "practice"
+    ]
+}
+
+# =====================================================
+# CONTENT TEMPLATES
+# =====================================================
+POST_TEMPLATES = {
+    "discussion": [
+        "What do you think about {topic}?",
+        "Let's discuss about {topic}",
+        "Any thoughts on {topic}?"
+    ],
+    "fan_content": [
+        "Fan art inspired by {topic}",
+        "I made this for {topic}",
+        "Sharing my fan content about {topic}"
+    ],
+    "announcement": [
+        "Official announcement regarding {topic}",
+        "Important update about {topic}"
+    ],
+    "daily_life": [
+        "A day in my life",
+        "Sharing some daily moments",
+        "Daily life lately"
+    ],
+    "dance": [
+        "Dance practice today",
+        "Trying new choreography",
+        "Dance cover rehearsal"
+    ],
+    "music": [
+        "Listening to music lately",
+        "Working on new music",
+        "Music that inspires me"
+    ],
+    "behind_the_scene": [
+        "Behind the scene moments",
+        "Backstage vibes",
+        "Unseen moments from practice"
+    ],
+    "collab": [
+        "Collaboration in progress",
+        "Working with amazing people",
+        "New collab coming soon"
+    ]
+}
+
+MICRO_NOISE = [
+    "",
+    " ✨",
+    " 💙",
+    " 🎶",
+    " today",
+    " lately",
+    " lately 😊"
+]
+
+# =====================================================
+# UTILS
+# =====================================================
 def random_datetime():
     delta = END_DATE - START_DATE
     return START_DATE + timedelta(
         seconds=random.randint(0, int(delta.total_seconds()))
     )
 
-# ================= LOAD JSON =================
+def post_range(uid, idol_set):
+    return POST_RANGE_IDOL if uid in idol_set else POST_RANGE_FAN
+
+def sample_tags():
+    tags = []
+
+    tags.append(random.choice(TAG_CATALOG["content"]))
+
+    tags.extend(random.sample(
+        TAG_CATALOG["theme"],
+        random.randint(1, 2)
+    ))
+
+    if random.random() < 0.4:
+        tags.append(random.choice(TAG_CATALOG["mood"]))
+
+    if random.random() < 0.2:
+        tags.append(random.choice(TAG_CATALOG["event"]))
+
+    return list(set(tags))
+
+def generate_post_content(tags):
+    primary = random.choice(tags)
+    templates = POST_TEMPLATES.get(primary, [
+        "Sharing something about {topic}"
+    ])
+    template = random.choice(templates)
+    topic = primary.replace("_", " ")
+    return template.format(topic=topic) + random.choice(MICRO_NOISE)
+
+# =====================================================
+# LOAD DATA
+# =====================================================
 with open("communities.json") as f:
     communities = json.load(f)
 
 with open("idols.json") as f:
     idols = json.load(f)
 
-# ================= DB =================
+# =====================================================
+# DB
+# =====================================================
 conn = psycopg2.connect(**DB_CONFIG)
 cur = conn.cursor()
 
-cur.execute("""
-SELECT
-  current_database(),
-  current_schema(),
-  inet_server_addr(),
-  inet_server_port();
-""")
-print("🔍 DB INFO:", cur.fetchone())
 # =====================================================
 # 1️⃣ COMMUNITY
 # =====================================================
 community_rows = []
 community_id_map = {}
+community_counts = defaultdict(lambda: {"idols": 0, "members": 0})
 
 for c in communities:
     cid = str(uuid.uuid4())
     t = random_datetime()
-
-    community_id_map[c["name"]] = cid
+    community_id_map[c["id"]] = cid
 
     community_rows.append((
-        cid, c["name"], c["communityType"],
+        cid,
+        c["name"],
+        c["communityType"],
         AVATAR.format(random.randint(1, 70)),
         BG.format(random.randint(1, 1000)),
-        t, t
+        t,
+        t
     ))
 
 execute_batch(cur, """
 INSERT INTO community (
-    id, name, community_type,
-    avatar_url, background_url,
-    "createdAt", "updatedAt"
+  id, name, community_type,
+  avatar_url, background_url,
+  "createdAt", "updatedAt"
 )
 VALUES (%s,%s,%s,%s,%s,%s,%s)
 """, community_rows)
 
-print(f"✅ Communities: {len(community_rows)}")
-
 # =====================================================
-# 2️⃣ USER (IDOL)
+# 2️⃣ USERS (IDOL)
 # =====================================================
-user_rows = []
 idol_user_ids = []
-seen_stage = set()
+user_rows = []
+seen_usernames = {}
 
 for idol in idols:
     stage = idol["stageName"].strip()
-    if stage in seen_stage:
-        continue
-    seen_stage.add(stage)
+    base_username = stage.lower().replace(" ", "_").replace(".", "").replace(":", "")
+
+    # Make username unique by adding a counter if duplicate
+    if base_username in seen_usernames:
+        seen_usernames[base_username] += 1
+        username = f"{base_username}_{seen_usernames[base_username]}"
+    else:
+        seen_usernames[base_username] = 0
+        username = base_username
+
+    email = f"{username}@idol.com"
 
     uid = str(uuid.uuid4())
     t = random_datetime()
-
-    community_name = next(
-        c["name"] for c in communities
-        if c["id"] == idol["communityId"]
-    )
+    cid = community_id_map[idol["communityId"]]
 
     user_rows.append((
         uid,
-        f"{stage.lower()}@idol.com",
-        stage.lower(),
+        email,
+        username,
         "hashed_password",
         "IDOL",
         AVATAR.format(random.randint(1, 70)),
         BG.format(random.randint(1, 1000)),
-        community_id_map[community_name],
-        t, t
+        cid,
+        t,
+        t
     ))
-
     idol_user_ids.append(uid)
-
-execute_batch(cur, """
-INSERT INTO "user" (
-    id, email, username, password, role,
-    avatar_url, background_url,
-    "communityId",
-    "createdAt", "updatedAt"
-)
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-""", user_rows)
-
-print(f"✅ Idols: {len(idol_user_ids)}")
+    community_counts[cid]["idols"] += 1
 
 # =====================================================
-# 3️⃣ USER (FAN) – EMAIL UNIQUE
+# 3️⃣ USERS (FAN)
 # =====================================================
 fan_user_ids = []
-fan_rows = []
 
 for i in range(TOTAL_FANS):
     uid = str(uuid.uuid4())
     t = random_datetime()
+    username = f"fan_{i}"
+    email = f"{username}@mail.com"
 
-    fan_rows.append((
+    user_rows.append((
         uid,
-        f"fan_{uid[:8]}@mail.com",  # 🔒 UNIQUE
-        f"fan_{i}",
+        email,
+        username,
         "hashed_password",
         "FAN",
         AVATAR.format(random.randint(1, 70)),
         None,
         None,
-        t, t
+        t,
+        t
     ))
     fan_user_ids.append(uid)
 
 execute_batch(cur, """
 INSERT INTO "user" (
-    id, email, username, password, role,
-    avatar_url, background_url,
-    "communityId",
-    "createdAt", "updatedAt"
+  id, email, username, password, role,
+  avatar_url, background_url,
+  "communityId",
+  "createdAt", "updatedAt"
 )
 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-""", fan_rows)
+""", user_rows)
 
-print(f"✅ Fans: {len(fan_user_ids)}")
+idol_set = set(idol_user_ids)
 
 # =====================================================
-# 4️⃣ COMMUNITY_FOLLOWER
+# 4️⃣ COMMUNITY FOLLOWER
 # =====================================================
+user_followed_communities = defaultdict(list)
 follower_rows = []
 
-for fan_id in fan_user_ids:
+for uid in fan_user_ids:
     for cid in community_id_map.values():
         if random.random() < FOLLOW_RATE:
             t = random_datetime()
             follower_rows.append((
                 str(uuid.uuid4()),
                 True,
-                t, t,
-                0, False, None,
+                t,
+                t,
+                0,
+                False,
+                None,
                 Json({}),
-                fan_id,
+                uid,
                 cid
             ))
+            user_followed_communities[uid].append(cid)
+            community_counts[cid]["members"] += 1
 
 execute_batch(cur, """
 INSERT INTO community_follower (
-    id, "isActive", "createdAt", "updatedAt",
-    version, is_deleted, deleted_at,
-    metadata, "userId", "communityId"
+  id, "isActive", "createdAt", "updatedAt",
+  version, is_deleted, deleted_at,
+  metadata, "userId", "communityId"
 )
 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
 """, follower_rows)
 
-print(f"✅ Community Followers: {len(follower_rows)}")
-
 # =====================================================
-# 5️⃣ POST (IDOL + FAN)
+# 5️⃣ POST
 # =====================================================
 post_rows = []
-all_users = idol_user_ids + fan_user_ids
-all_communities = list(community_id_map.values())
 
-for uid in all_users:
-    for _ in range(random.randint(*POST_PER_USER)):
+for uid in idol_user_ids + fan_user_ids:
+    followed = user_followed_communities.get(uid)
+    if not followed:
+        continue
+
+    for _ in range(random.randint(*post_range(uid, idol_set))):
         t = random_datetime()
 
-        if random.random() < UNFOLLOW_POST_RATE:
-            cid = random.choice(all_communities)
-        else:
-            cid = random.choice(all_communities)
+        cid = (
+            random.choice(followed)
+            if random.random() > NOISE_POST_RATE
+            else random.choice(list(community_id_map.values()))
+        )
+
+        tags = sample_tags()
+        content = generate_post_content(tags)
+
+        # Generate media URLs for 80% of posts
+        media_urls = []
+        if random.random() < POST_IMAGE_RATE:
+            num_images = random.randint(1, 3)
+            media_urls = [
+                POST_IMAGE.format(random.randint(1, 10000))
+                for _ in range(num_images)
+            ]
 
         post_rows.append((
             str(uuid.uuid4()),
-            f"Post by user {uid[:6]}",
-            Json({"tags": random.sample(TAGS_POOL, random.randint(1, 3))}),
+            content,
+            Json({"tags": tags}),
+            Json(media_urls),
             uid,
             cid,
-            t, t
+            t,
+            t
         ))
 
 execute_batch(cur, """
 INSERT INTO post (
-    id, content, metadata,
-    "authorId", "communityId",
-    "createdAt", "updatedAt"
+  id, content, metadata, "media_urls",
+  "authorId", "communityId",
+  "createdAt", "updatedAt"
 )
-VALUES (%s,%s,%s,%s,%s,%s,%s)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
 """, post_rows)
 
-print(f"✅ Posts: {len(post_rows)}")
-
 # =====================================================
-# 6️⃣ INTERACTION (VIEW / LIKE / COMMENT)
+# 6️⃣ INTERACTION
 # =====================================================
-VIEW_RANGE = (5, 25)
-LIKE_RATIO = (0.1, 0.3)
-COMMENT_RATIO = (0.05, 0.15)
+view_rows, like_rows, comment_rows = [], [], []
+post_counts = defaultdict(lambda: {"views": 0, "likes": 0, "comments": 0})
 
-IDOL_VIEW_RATIO = 0.3
-IDOL_LIKE_BOOST = 1.5
-IDOL_COMMENT_BOOST = 2.0
-
-view_rows = []
-like_rows = []
-comment_rows = []
-
-idol_set = set(idol_user_ids)
-fan_set = set(fan_user_ids)
-
-print("🚀 Seeding interactions...")
-
-for post_id, _, _, author_id, _, post_created_at, _ in post_rows:
-    # -----------------
-    # VIEWERS
-    # -----------------
-    view_count = random.randint(*VIEW_RANGE)
-
-    idol_views = int(view_count * IDOL_VIEW_RATIO)
-    fan_views = view_count - idol_views
-
-    viewers = set()
-    viewers.update(random.sample(idol_user_ids, min(idol_views, len(idol_user_ids))))
-    viewers.update(random.sample(fan_user_ids, min(fan_views, len(fan_user_ids))))
+for post_id, _, _, _, author_id, community_id, post_time, _ in post_rows:
+    author_is_idol = author_id in idol_set
+    viewers = random.sample(
+        fan_user_ids,
+        random.randint(*VIEW_RANGE)
+    )
 
     for uid in viewers:
-        t = post_created_at + timedelta(
-            minutes=random.randint(1, 60 * 24 * 30)
+        follows = community_id in user_followed_communities.get(uid, [])
+        if not follows and random.random() > NOISE_INTERACTION_RATE:
+            continue
+
+        t = post_time + timedelta(
+            minutes=random.randint(1, 60 * 24 * 14)
         )
+
         view_rows.append((
             str(uuid.uuid4()),
             post_id,
             uid,
-            t, t
+            t,
+            t
         ))
+        post_counts[post_id]["views"] += 1
 
-    # -----------------
-    # LIKES
-    # -----------------
-    for uid in viewers:
-        prob = random.uniform(*LIKE_RATIO)
-        if uid in idol_set:
-            prob *= IDOL_LIKE_BOOST
+        like_prob = random.uniform(*LIKE_RATIO)
+        comment_prob = random.uniform(*COMMENT_RATIO)
 
-        if random.random() < min(prob, 1.0):
-            t = post_created_at + timedelta(
-                minutes=random.randint(1, 60 * 24 * 30)
-            )
+        if author_is_idol:
+            like_prob *= IDOL_LIKE_BOOST
+            comment_prob *= IDOL_COMMENT_BOOST
+
+        if random.random() < min(like_prob, 1):
             like_rows.append((
                 str(uuid.uuid4()),
                 post_id,
                 uid,
-                t, t
+                t,
+                t
             ))
+            post_counts[post_id]["likes"] += 1
 
-    # -----------------
-    # COMMENTS
-    # -----------------
-    for uid in viewers:
-        prob = random.uniform(*COMMENT_RATIO)
-        if uid in idol_set:
-            prob *= IDOL_COMMENT_BOOST
-
-        if random.random() < min(prob, 1.0):
-            t = post_created_at + timedelta(
-                minutes=random.randint(1, 60 * 24 * 30)
-            )
+        if random.random() < min(comment_prob, 1):
             comment_rows.append((
                 str(uuid.uuid4()),
-                f"Comment by {uid[:6]}",
+                f"Nice post!",
                 post_id,
                 uid,
-                t, t
+                t,
+                t
             ))
+            post_counts[post_id]["comments"] += 1
 
-# =====================
-# INSERT BATCH
-# =====================
-print("💾 Inserting post_view...")
+# =====================================================
+# INSERT INTERACTION
+# =====================================================
 execute_batch(cur, """
 INSERT INTO post_view (
-    id, "postId", "userId",
-    "createdAt", "updatedAt"
+  id, "postId", "userId",
+  "createdAt", "updatedAt"
 )
 VALUES (%s,%s,%s,%s,%s)
 """, view_rows, page_size=1000)
 
-print("💾 Inserting post_like...")
 execute_batch(cur, """
 INSERT INTO post_like (
-    id, "postId", "userId",
-    "createdAt", "updatedAt"
+  id, "postId", "userId",
+  "createdAt", "updatedAt"
 )
 VALUES (%s,%s,%s,%s,%s)
 """, like_rows, page_size=1000)
 
-print("💾 Inserting comment...")
 execute_batch(cur, """
 INSERT INTO comment (
-    id, content,
-    "postId", "userId",
-    "createdAt", "updatedAt"
+  id, content,
+  "postId", "userId",
+  "createdAt", "updatedAt"
 )
 VALUES (%s,%s,%s,%s,%s,%s)
 """, comment_rows, page_size=1000)
 
-print(f"👀 Views: {len(view_rows)}")
-print(f"❤️ Likes: {len(like_rows)}")
-print(f"💬 Comments: {len(comment_rows)}")
+# =====================================================
+# UPDATE POST COUNTS
+# =====================================================
+update_rows = [
+    (
+        post_counts[post_id]["views"],
+        post_counts[post_id]["likes"],
+        post_counts[post_id]["comments"],
+        post_id
+    )
+    for post_id, _, _, _, _, _, _, _ in post_rows
+]
 
-# 🔥 BẮT BUỘC
+execute_batch(cur, """
+UPDATE post
+SET view_count = %s,
+    like_count = %s,
+    comment_count = %s
+WHERE id = %s
+""", update_rows, page_size=1000)
+
+# =====================================================
+# UPDATE COMMUNITY COUNTS
+# =====================================================
+community_update_rows = [
+    (
+        community_counts[cid]["idols"],
+        community_counts[cid]["members"],
+        cid
+    )
+    for cid, _, _, _, _, _, _ in community_rows
+]
+
+execute_batch(cur, """
+UPDATE community
+SET total_idol = %s,
+    total_member = %s
+WHERE id = %s
+""", community_update_rows)
+
 conn.commit()
-
 cur.close()
 conn.close()
 
-print("🎉 FULL SEED COMPLETED SUCCESSFULLY")
+print("🎉 SEED COMPLETED — USER FRIENDLY TAG VERSION")
