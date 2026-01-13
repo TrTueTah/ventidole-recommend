@@ -30,5 +30,5 @@ services:
       - recommendation-network
 
 networks:
-  recommendation-network:
-    driver: bridge
+  ventidole-network:
+    external: true
