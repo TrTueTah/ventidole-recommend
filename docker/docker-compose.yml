@@ -27,7 +27,7 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - recommendation-network
+      - ventidole-network
 
 networks:
   ventidole-network:
