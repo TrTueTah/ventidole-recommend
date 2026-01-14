@@ -4,18 +4,23 @@ Model Manager - Handles loading and caching of the recommendation model and feat
 import logging
 import os
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
 import numpy as np
 from scipy.sparse import csr_matrix
 from lightfm import LightFM
 from lightfm.data import Dataset
 
 # Import from existing modules
-from data.load_data import load_users, load_posts, load_interactions, load_community_followers
+from data.load_data import (
+    load_users, load_posts, load_interactions, load_community_followers,
+    load_posts_with_engagement, load_user_interaction_counts, load_community_dominant_tags,
+    check_user_exists, load_user_followed_communities
+)
 from data.preprocess import build_dataset
 from storage.save_load import load_model
 from config import MODEL_PATH
 from api.exceptions import ModelNotLoadedException
+from api.services.cold_start_strategy import ColdStartStrategy, UserState
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +48,11 @@ class ModelManager:
         self.model_mtime: Optional[float] = None  # Model file modification time
         self.last_reload_time: Optional[datetime] = None
 
+        # Cold-start strategy
+        self.cold_start_strategy: Optional[ColdStartStrategy] = None
+        self.user_followed_communities: Dict[str, Set[str]] = {}
+        self.all_users: Set[str] = set()  # All known users (including those without interactions)
+
     def load_recommendation_model(self, model_path: str = None) -> None:
         """
         Load the trained model and build feature matrices.
@@ -64,13 +74,16 @@ class ModelManager:
             self.model, saved_dataset, saved_user_features, saved_item_features = load_model(model_path)
             logger.info("Model loaded successfully")
 
-            # 2. Load data from PostgreSQL (only for metadata)
+            # 2. Load data from PostgreSQL (for metadata and cold-start)
             logger.info("Loading data from database...")
             users_df = load_users()
             posts_df = load_posts()
             interactions_df = load_interactions()
             community_followers_df = load_community_followers()
             logger.info(f"Loaded {len(users_df)} users, {len(posts_df)} posts, {len(interactions_df)} interactions")
+
+            # Store all known users
+            self.all_users = set(users_df['id'].tolist())
 
             # 3. Use saved dataset and feature matrices for consistency
             # If they were saved with model, use them directly to avoid feature mismatch
@@ -110,6 +123,11 @@ class ModelManager:
                 }
             logger.info(f"Cached metadata for {len(self.posts_metadata)} posts")
 
+            # 6. Initialize cold-start strategy
+            logger.info("Initializing cold-start strategy...")
+            self._initialize_cold_start_strategy(community_followers_df)
+            logger.info("Cold-start strategy initialized")
+
             # Track model file info for reload detection
             self.model_path = model_path
             if os.path.exists(model_path):
@@ -128,6 +146,135 @@ class ModelManager:
             error_msg = f"Failed to load model: {str(e)}"
             logger.error(error_msg, exc_info=True)
             raise ModelNotLoadedException(error_msg) from e
+
+    def _initialize_cold_start_strategy(self, community_followers_df) -> None:
+        """
+        Initialize the cold-start strategy with required data.
+
+        Args:
+            community_followers_df: DataFrame with userId, communityId columns
+        """
+        # Create cold-start strategy instance
+        self.cold_start_strategy = ColdStartStrategy()
+
+        # Build user -> followed communities mapping
+        self.user_followed_communities = {}
+        for _, row in community_followers_df.iterrows():
+            user_id = row['userId']
+            community_id = row['communityId']
+            if user_id not in self.user_followed_communities:
+                self.user_followed_communities[user_id] = set()
+            self.user_followed_communities[user_id].add(community_id)
+
+        # Load additional data for cold-start
+        try:
+            # User interaction counts
+            interaction_counts_df = load_user_interaction_counts()
+            user_interaction_counts = dict(zip(
+                interaction_counts_df['user_id'],
+                interaction_counts_df['interaction_count']
+            ))
+        except Exception as e:
+            logger.warning(f"Failed to load interaction counts: {e}, using empty dict")
+            user_interaction_counts = {}
+
+        try:
+            # Community dominant tags
+            tags_df = load_community_dominant_tags()
+            community_dominant_tags: Dict[str, Dict[str, int]] = {}
+            for _, row in tags_df.iterrows():
+                comm_id = row['communityId']
+                if comm_id not in community_dominant_tags:
+                    community_dominant_tags[comm_id] = {}
+                community_dominant_tags[comm_id][row['tag']] = row['tag_count']
+        except Exception as e:
+            logger.warning(f"Failed to load community tags: {e}, using empty dict")
+            community_dominant_tags = {}
+
+        try:
+            # Posts with engagement data
+            posts_engagement_df = load_posts_with_engagement()
+            posts_data: Dict[str, Dict[str, Any]] = {}
+            for _, row in posts_engagement_df.iterrows():
+                post_id = row['id']
+                posts_data[post_id] = {
+                    'metadata': row.get('metadata', {}),
+                    'communityId': row.get('communityId'),
+                    'createdAt': row.get('createdAt'),
+                    'view_count': row.get('view_count', 0) or 0,
+                    'like_count': row.get('like_count', 0) or 0,
+                    'comment_count': row.get('comment_count', 0) or 0
+                }
+        except Exception as e:
+            logger.warning(f"Failed to load posts engagement: {e}, using basic metadata")
+            posts_data = self.posts_metadata.copy()
+
+        # Load data into cold-start strategy
+        self.cold_start_strategy.load_data(
+            user_interaction_counts=user_interaction_counts,
+            user_followed_communities=self.user_followed_communities,
+            community_dominant_tags=community_dominant_tags,
+            posts_data=posts_data
+        )
+
+    def get_cold_start_strategy(self) -> ColdStartStrategy:
+        """Get the cold-start strategy instance."""
+        if not self.is_loaded or self.cold_start_strategy is None:
+            raise ModelNotLoadedException("Cold-start strategy not initialized")
+        return self.cold_start_strategy
+
+    def get_user_state(self, user_id: str) -> UserState:
+        """
+        Determine if a user is in cold-start or normal state.
+
+        Args:
+            user_id: User ID to check
+
+        Returns:
+            UserState.COLD_START or UserState.NORMAL
+        """
+        if self.cold_start_strategy is None:
+            raise ModelNotLoadedException("Cold-start strategy not initialized")
+        return self.cold_start_strategy.detect_user_state(user_id)
+
+    def is_known_user(self, user_id: str) -> bool:
+        """
+        Check if user exists in the system (even if not in training data).
+        Falls back to database check for users created after startup.
+
+        Args:
+            user_id: User ID to check
+
+        Returns:
+            True if user exists in database
+        """
+        # First check cached users
+        if user_id in self.all_users:
+            return True
+
+        # Fall back to database check for new users created after startup
+        try:
+            exists = check_user_exists(user_id)
+            if exists:
+                # Add to cache for future requests
+                self.all_users.add(user_id)
+                logger.info(f"New user {user_id} found in database, added to cache")
+            return exists
+        except Exception as e:
+            logger.error(f"Error checking user existence in database: {e}")
+            return False
+
+    def is_user_in_model(self, user_id: str) -> bool:
+        """
+        Check if user exists in the trained model.
+
+        Args:
+            user_id: User ID to check
+
+        Returns:
+            True if user is in the model's training data
+        """
+        return user_id in self.user_to_idx
 
     def get_model(self) -> LightFM:
         """Get the loaded model"""
@@ -202,14 +349,25 @@ class ModelManager:
         Returns:
             Dictionary with health check information
         """
+        cold_start_info = {}
+        if self.cold_start_strategy:
+            cold_start_info = {
+                "users_with_interactions": len(self.cold_start_strategy.user_interaction_counts),
+                "users_with_followed_communities": len(self.cold_start_strategy.user_followed_communities),
+                "communities_with_tags": len(self.cold_start_strategy.community_dominant_tags),
+                "posts_with_engagement": len(self.cold_start_strategy.posts_data)
+            }
+
         return {
             "is_loaded": self.is_loaded,
             "num_users": len(self.user_to_idx) if self.is_loaded else 0,
+            "num_all_users": len(self.all_users) if self.is_loaded else 0,
             "num_items": len(self.item_to_idx) if self.is_loaded else 0,
             "num_posts_metadata": len(self.posts_metadata) if self.is_loaded else 0,
             "model_type": type(self.model).__name__ if self.model else None,
             "model_path": self.model_path,
-            "last_reload_time": self.last_reload_time.isoformat() if self.last_reload_time else None
+            "last_reload_time": self.last_reload_time.isoformat() if self.last_reload_time else None,
+            "cold_start_strategy": cold_start_info
         }
 
     def check_model_file_updated(self) -> bool:

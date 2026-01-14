@@ -26,6 +26,10 @@ class RecommendationResponse(BaseModel):
     user_id: str = Field(..., description="User ID for whom recommendations were generated")
     recommendations: List[PostRecommendation] = Field(..., description="List of recommended posts")
     pagination: PaginationMetadata = Field(..., description="Pagination metadata")
+    strategy: Optional[str] = Field(
+        default=None,
+        description="Strategy used for recommendations: 'cold_start' or 'hybrid'"
+    )
 
     class Config:
         json_schema_extra = {
@@ -46,7 +50,8 @@ class RecommendationResponse(BaseModel):
                     "limit": 20,
                     "offset": 0,
                     "has_more": True
-                }
+                },
+                "strategy": "hybrid"
             }
         }
 
